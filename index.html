@@ -222,7 +222,6 @@ const FRAME_US = 1e6 / FPS;
 const V_BITRATE = 500_000;
 const A_BITRATE = 96_000;
 const ZOOM_MIN = 1, ZOOM_MAX = 5;
-const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js';
 
 const $ = id => document.getElementById(id);
 const cam = $('cam'), canvas = $('canvas'), ctx = canvas.getContext('2d'), playback = $('playback');
@@ -283,15 +282,13 @@ async function drain() { while (pending.length) { const p = pending; pending = [
 // フレームに「録画した時間」でタイムスタンプを付けて直接エンコード。
 // 一時停止や開き直しがあっても、終了時はデータを並べて包むだけなので一瞬で完成します。
 const WC = {
-  vCodec: null, vEnc: null, aEnc: null, vcfg: null, acfg: null,
+  vCodec: null, aCodec: 'aac', vEnc: null, aEnc: null, vcfg: null, acfg: null,
   v: [], a: [], frameIndex: 0, nextFrameUs: 0, needKey: true,
   audioBaseUs: 0, audioSamples: 0, lastAudioEndUs: 0,
 
   async supported() {
     try {
       if (!window.VideoEncoder || !window.VideoFrame) return false;
-      if (!window.Mp4Muxer) await loadScript(MUXER_URL);
-      if (!window.Mp4Muxer) return false;
       for (const codec of ['avc1.42001f', 'avc1.4d001f', 'avc1.64001f']) {
         const r = await VideoEncoder.isConfigSupported(this.vConfig(codec));
         if (r.supported) { this.vCodec = codec; break; }
@@ -299,8 +296,14 @@ const WC = {
       if (!this.vCodec) return false;
       if (audioStream) {
         if (!window.AudioEncoder || !window.AudioData || !capNode) return false;
-        const r = await AudioEncoder.isConfigSupported(this.aConfig());
-        if (!r.supported) return false;
+        // AAC を優先。使えない端末では Opus
+        this.aCodec = null;
+        for (const c of ['aac', 'opus']) {
+          if (c === 'opus' && audioCtx.sampleRate !== 48000) continue;
+          const r = await AudioEncoder.isConfigSupported(this.aConfig(c));
+          if (r.supported) { this.aCodec = c; break; }
+        }
+        if (!this.aCodec) return false;
       }
       return true;
     } catch (e) { return false; }
@@ -308,8 +311,10 @@ const WC = {
   vConfig(codec) {
     return { codec, width: OUT, height: OUT, bitrate: V_BITRATE, framerate: FPS, avc: { format: 'avc' } };
   },
-  aConfig() {
-    return { codec: 'mp4a.40.2', sampleRate: audioCtx.sampleRate, numberOfChannels: 1, bitrate: A_BITRATE, aac: { format: 'aac' } };
+  aConfig(c = this.aCodec) {
+    return c === 'opus'
+      ? { codec: 'opus', sampleRate: 48000, numberOfChannels: 1, bitrate: A_BITRATE }
+      : { codec: 'mp4a.40.2', sampleRate: audioCtx.sampleRate, numberOfChannels: 1, bitrate: A_BITRATE, aac: { format: 'aac' } };
   },
   ensureEncoders() {
     if (!this.vEnc) {
@@ -335,7 +340,7 @@ const WC = {
         },
         error: e => { $('msg').textContent = '音声エンコードのエラー：' + e.message; }
       });
-      this.aEnc.configure(this.aConfig());
+      this.aEnc.configure(this.aConfig(this.aCodec));
     }
   },
   start() { this.v = []; this.a = []; this.vcfg = this.acfg = null; this.frameIndex = 0; this.nextFrameUs = 0; this.lastAudioEndUs = 0; this.resume(); },
@@ -375,7 +380,7 @@ const WC = {
     this.lastAudioEndUs = ts + buf.length * 1e6 / sr;
   },
   restore(rows, s) {
-    this.vcfg = s.vcfg || null; this.acfg = s.acfg || null;
+    this.vcfg = s.vcfg || null; this.acfg = s.acfg || null; this.aCodec = s.aCodec || this.aCodec;
     this.v = rows.filter(r => r.k === 'v');
     this.a = rows.filter(r => r.k === 'a');
     this.frameIndex = this.v.length;
@@ -393,32 +398,16 @@ const WC = {
 
     const v = this.v.slice().sort((x, y) => x.ts - y.ts);
     while (v.length && v[0].t !== 'key') v.shift();
-    // 音声の設定情報が届かなかった端末向けに、AACの設定を自前で用意する
-    if (this.a.length && !this.acfg) this.acfg = aacConfig(audioCtx ? audioCtx.sampleRate : 48000);
-    const useAudio = this.a.length > 0 && this.acfg;
-    const a = useAudio ? this.a.slice().sort((x, y) => x.ts - y.ts) : [];
-    const M = window.Mp4Muxer;
-    const muxer = new M.Muxer({
-      target: new M.ArrayBufferTarget(),
-      video: { codec: 'avc', width: OUT, height: OUT, frameRate: FPS },
-      audio: useAudio ? { codec: 'aac', numberOfChannels: 1, sampleRate: this.acfg.sampleRate } : undefined,
-      fastStart: 'in-memory',
-      firstTimestampBehavior: 'offset'
-    });
-    let i = 0, j = 0, firstV = true, firstA = true;
-    while (i < v.length || j < a.length) {
-      if (j >= a.length || (i < v.length && v[i].ts <= a[j].ts)) {
-        const c = v[i++];
-        muxer.addVideoChunkRaw(c.d, c.t, c.ts, c.du, firstV ? { decoderConfig: this.vcfg } : undefined);
-        firstV = false;
-      } else {
-        const c = a[j++];
-        muxer.addAudioChunkRaw(c.d, c.t, c.ts, c.du, firstA ? { decoderConfig: this.acfg } : undefined);
-        firstA = false;
-      }
-    }
-    muxer.finalize();
-    return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+    if (!v.length || !this.vcfg) throw new Error('映像データがありません');
+    const a = this.a.slice().sort((x, y) => x.ts - y.ts);
+    const sr = audioCtx ? audioCtx.sampleRate : 48000;
+    if (a.length && !this.acfg) this.acfg = this.aCodec === 'opus' ? { sampleRate: 48000 } : aacConfig(sr);
+    let asc = this.acfg && this.acfg.description;
+    if (this.aCodec !== 'opus' && !asc) asc = aacConfig((this.acfg && this.acfg.sampleRate) || sr).description;
+    return MP4.build(
+      { width: OUT, height: OUT, avcC: this.vcfg.description, samples: v },
+      a.length ? { codec: this.aCodec, sampleRate: (this.acfg && this.acfg.sampleRate) || sr, channels: 1, description: asc, samples: a } : null
+    );
   }
 };
 
@@ -526,6 +515,138 @@ function aacConfig(sr) {
   return { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: ch, description: desc };
 }
 
+// ================= 小さなMP4書き出し（外部ライブラリ不要） =================
+// 映像(H.264)と音声(AAC または Opus)のデータを、そのまま MP4 の箱に詰めます。
+const MP4 = (() => {
+  const enc = new TextEncoder();
+  const u8 = d => d instanceof Uint8Array ? d : d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+  const cat = parts => {
+    const n = parts.reduce((s, p) => s + p.length, 0);
+    const out = new Uint8Array(n); let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  };
+  const u32 = v => new Uint8Array([(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]);
+  const u16 = v => new Uint8Array([(v >>> 8) & 255, v & 255]);
+  const u8b = v => new Uint8Array([v & 255]);
+  const zeros = n => new Uint8Array(n);
+  const str = s => enc.encode(s);
+  const box = (type, ...body) => { const b = cat(body.map(u8)); return cat([u32(b.length + 8), str(type), b]); };
+  const full = (type, ver, flags, ...body) => box(type, u8b(ver), new Uint8Array([(flags >> 16) & 255, (flags >> 8) & 255, flags & 255]), ...body);
+  const MATRIX = cat([u32(0x10000), u32(0), u32(0), u32(0), u32(0x10000), u32(0), u32(0), u32(0), u32(0x40000000)]);
+
+  // 記述子（esds用）
+  const desc = (tag, body) => cat([u8b(tag), new Uint8Array([0x80, 0x80, 0x80, body.length]), body]);
+
+  function stts(deltas) {
+    const runs = [];
+    for (const d of deltas) {
+      if (runs.length && runs[runs.length - 1][1] === d) runs[runs.length - 1][0]++;
+      else runs.push([1, d]);
+    }
+    return full('stts', 0, 0, u32(runs.length), ...runs.map(([c, d]) => cat([u32(c), u32(d)])));
+  }
+
+  // タイムスタンプ（µs）から、各サンプルの長さを時間単位で求める
+  function ticks(samples, scale, lastDefault) {
+    const pos = samples.map(s => Math.round((s.ts - samples[0].ts) * scale / 1e6));
+    const d = [];
+    for (let i = 0; i < samples.length; i++) {
+      d.push(i + 1 < samples.length ? Math.max(1, pos[i + 1] - pos[i]) : Math.max(1, Math.round((samples[i].du || lastDefault) * scale / 1e6)));
+    }
+    return d;
+  }
+
+  function trak(id, t, offsets, movieScale) {
+    const total = t.deltas.reduce((a, b) => a + b, 0);
+    const movieDur = Math.round(total * movieScale / t.scale);
+    const isV = t.kind === 'v';
+    const tkhd = full('tkhd', 0, 3, u32(0), u32(0), u32(id), u32(0), u32(movieDur), zeros(8),
+      u16(0), u16(0), u16(isV ? 0 : 0x0100), u16(0), MATRIX, u32((t.width || 0) << 16), u32((t.height || 0) << 16));
+    const mdhd = full('mdhd', 0, 0, u32(0), u32(0), u32(t.scale), u32(total), u16(0x55c4), u16(0));
+    const hdlr = full('hdlr', 0, 0, u32(0), str(isV ? 'vide' : 'soun'), zeros(12), str(isV ? 'VideoHandler\0' : 'SoundHandler\0'));
+    const mhd = isV ? full('vmhd', 0, 1, zeros(8)) : full('smhd', 0, 0, zeros(4));
+    const dinf = box('dinf', full('dref', 0, 0, u32(1), full('url ', 0, 1)));
+    const n = t.samples.length;
+    const stbl = box('stbl',
+      full('stsd', 0, 0, u32(1), t.entry),
+      stts(t.deltas),
+      ...(isV ? [full('stss', 0, 0, u32(t.keys.length), ...t.keys.map(u32))] : []),
+      full('stsc', 0, 0, u32(1), u32(1), u32(1), u32(1)),
+      full('stsz', 0, 0, u32(0), u32(n), ...t.samples.map(s => u32(s.d.length))),
+      full('stco', 0, 0, u32(n), ...offsets.map(u32))
+    );
+    return box('trak', tkhd, box('mdia', mdhd, hdlr, box('minf', mhd, dinf, stbl)));
+  }
+
+  function videoEntry(w, h, avcC) {
+    return box('avc1', zeros(6), u16(1), u16(0), u16(0), zeros(12), u16(w), u16(h),
+      u32(0x00480000), u32(0x00480000), u32(0), u16(1), zeros(32), u16(0x18), u16(0xffff),
+      box('avcC', u8(avcC)));
+  }
+  function audioBase(type, ch, sr, extra) {
+    return box(type, zeros(6), u16(1), zeros(8), u16(ch), u16(16), u16(0), u16(0), u32((sr & 0xffff) << 16), extra);
+  }
+  function aacEntry(ch, sr, asc) {
+    const dcd = desc(4, cat([u8b(0x40), u8b(0x15), zeros(3), u32(0), u32(0), desc(5, u8(asc))]));
+    const esd = desc(3, cat([u16(1), u8b(0), dcd, desc(6, u8b(2))]));
+    return audioBase('mp4a', ch, sr, full('esds', 0, 0, esd));
+  }
+  function opusEntry(ch, preSkip, inputRate) {
+    const dOps = box('dOps', u8b(0), u8b(ch), u16(preSkip), u32(inputRate), u16(0), u8b(0));
+    return audioBase('Opus', ch, 48000, dOps);
+  }
+
+  // video: {width,height,avcC,samples[{d,t,ts,du}]}, audio: {codec,sampleRate,channels,description,samples} | null
+  function build(video, audio) {
+    const tracks = [];
+    const vs = video.samples;
+    tracks.push({
+      kind: 'v', scale: 90000, samples: vs, width: video.width, height: video.height,
+      deltas: ticks(vs, 90000, 40000),
+      keys: vs.map((s, i) => s.t === 'key' ? i + 1 : 0).filter(Boolean),
+      entry: videoEntry(video.width, video.height, video.avcC)
+    });
+    if (audio && audio.samples.length) {
+      const opus = audio.codec === 'opus';
+      const scale = opus ? 48000 : audio.sampleRate;
+      let entry;
+      if (opus) {
+        let preSkip = 312;
+        const d = audio.description ? u8(audio.description) : null;
+        if (d && d.length >= 12 && String.fromCharCode(...d.slice(0, 8)) === 'OpusHead') preSkip = d[10] | (d[11] << 8);
+        entry = opusEntry(audio.channels, preSkip, audio.sampleRate);
+      } else {
+        entry = aacEntry(audio.channels, audio.sampleRate, audio.description);
+      }
+      tracks.push({
+        kind: 'a', scale, samples: audio.samples, entry,
+        deltas: ticks(audio.samples, scale, (opus ? 960 : 1024) * 1e6 / scale)
+      });
+    }
+
+    const ftyp = box('ftyp', str('isom'), u32(512), str('isom'), str('iso2'), str('avc1'), str('mp41'));
+    const movieScale = 1000;
+    const makeMoov = offs => {
+      const traks = tracks.map((t, i) => trak(i + 1, t, offs[i], movieScale));
+      const dur = Math.max(...tracks.map(t => Math.round(t.deltas.reduce((a, b) => a + b, 0) * movieScale / t.scale)));
+      const mvhd = full('mvhd', 0, 0, u32(0), u32(0), u32(movieScale), u32(dur), u32(0x10000), u16(0x0100), zeros(10), MATRIX, zeros(24), u32(tracks.length + 1));
+      return box('moov', mvhd, ...traks);
+    };
+    // 1回目で moov の大きさを測り、2回目で本当の位置を書き込む
+    const dummy = tracks.map(t => t.samples.map(() => 0));
+    const moovLen = makeMoov(dummy).length;
+    let pos = ftyp.length + moovLen + 8;
+    const offs = tracks.map(t => t.samples.map(s => { const o = pos; pos += s.d.length; return o; }));
+    const moov = makeMoov(offs);
+    const payload = [];
+    tracks.forEach(t => t.samples.forEach(s => payload.push(u8(s.d))));
+    const mdatLen = payload.reduce((a, p) => a + p.length, 0) + 8;
+    return new Blob([ftyp, moov, u32(mdatLen), str('mdat'), ...payload], { type: 'video/mp4' });
+  }
+  return { build };
+})();
+
 // ================= 共通処理 =================
 function loadScript(src) {
   return new Promise((res, rej) => {
@@ -540,7 +661,7 @@ function saveSession() {
   if (state === 'idle' || state === 'done') return;
   keep(DB.set('session', {
     engine, elapsed, facing, zoom,
-    segments: MR.segments, vcfg: WC.vcfg, acfg: WC.acfg
+    segments: MR.segments, vcfg: WC.vcfg, acfg: WC.acfg, aCodec: WC.aCodec
   }));
 }
 
@@ -607,7 +728,8 @@ async function startMic(showErr) {
 // マイク音声の通り道（レベル表示と、高速エンジンでの録音）
 async function setupAudio() {
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    try { audioCtx = new AC({ sampleRate: 48000 }); } catch (e) { audioCtx = new AC(); }
     analyser = audioCtx.createAnalyser(); analyser.fftSize = 512;
     sink = audioCtx.createGain(); sink.gain.value = 0; // スピーカーには出さない
     analyser.connect(sink); sink.connect(audioCtx.destination);
