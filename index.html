@@ -8,7 +8,7 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
   body {
-    --size: min(calc(100vw - 16px), calc(100vh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    --size: min(calc(100vw - 16px), calc(100vh - 212px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
     margin: 0; background: #0b0b0c; color: #fff; overflow: hidden;
     font-family: -apple-system, "Hiragino Sans", sans-serif;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -16,7 +16,7 @@
     gap: 10px; user-select: none; -webkit-user-select: none;
   }
   @supports (height: 100dvh) {
-    body { --size: min(calc(100vw - 16px), calc(100dvh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
+    body { --size: min(calc(100vw - 16px), calc(100dvh - 212px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
   }
   /* カメラ枠：画面に入るいちばん大きい正方形 */
   .stage {
@@ -65,7 +65,9 @@
     gap: 10px; background: rgba(0,0,0,.6); font-size: 16px; font-weight: 600;
   }
 
-  /* 操作バー：一時停止は左端、終了は右端 */
+  /* 上のバー：撮り直す（左）・終了（右） */
+  .topbar { width: var(--size); display: flex; justify-content: space-between; align-items: center; min-height: 52px; }
+  /* 下のバー：一時停止／再開・録画開始 */
   .controls {
     width: var(--size); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 72px;
   }
@@ -101,6 +103,11 @@
 </head>
 <body>
 
+<div class="topbar" id="topbar">
+  <button class="ctl" id="btnRetake" style="visibility:hidden">↺ 撮り直す</button>
+  <button class="ctl stop-btn hidden" id="btnStop">■ 終了</button>
+</div>
+
 <div class="stage" id="stage">
   <canvas id="canvas" width="720" height="720"></canvas>
   <video id="playback" playsinline controls></video>
@@ -120,12 +127,11 @@
 <div class="controls" id="controls">
   <div class="left"><button class="ctl hidden" id="btnPause">❚❚ 一時停止</button></div>
   <div class="center"><button class="rec-btn" id="btnStart" aria-label="録画開始" disabled>録画開始</button></div>
-  <div class="right"><button class="ctl stop-btn hidden" id="btnStop">■ 終了</button></div>
+  <div class="right"></div>
 </div>
 <div class="done-row hidden" id="doneRow">
   <button class="ctl save hidden" id="btnShare">写真に保存／共有</button>
   <button class="ctl save" id="btnSave">ダウンロード</button>
-  <button class="ctl" id="btnRetake">撮り直す</button>
 </div>
 <div id="msg"></div>
 
@@ -147,10 +153,10 @@
 {
 // ================= 設定 =================
 const MAX_MS = 90 * 1000;   // 最大録画時間 1:30
-const OUT = 360;            // 書き出しサイズ 360×360（1:1の360p）
+const OUT = 240;            // 書き出しサイズ 240×240（1:1の240p）
 const FPS = 25;             // 書き出しフレームレート
 const FRAME_US = 1e6 / FPS;
-const V_BITRATE = 1_000_000;
+const V_BITRATE = 500_000;
 const A_BITRATE = 96_000;
 const ZOOM_MIN = 1, ZOOM_MAX = 5;
 const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js';
@@ -164,7 +170,7 @@ const rctx = recCanvas.getContext('2d');
 
 let videoStream = null, audioStream = null;
 let audioCtx = null, capNode = null;
-let facing = 'user', drawMirror = true, switching = false;
+let facing = 'environment', drawMirror = false, switching = false;
 let zoom = 1;
 let state = 'idle';         // idle | recording | paused | finishing | done
 let elapsed = 0, lastTick = 0;
@@ -700,6 +706,7 @@ function setState(s) {
   $('btnStart').classList.toggle('hidden', s !== 'idle');
   $('btnPause').classList.toggle('hidden', !active);
   $('btnStop').classList.toggle('hidden', !active);
+  $('btnRetake').style.visibility = s === 'done' ? 'visible' : 'hidden';
   $('btnSwitch').classList.toggle('hidden', s === 'done' || s === 'finishing');
   $('zoomBox').classList.toggle('hidden', s === 'done' || s === 'finishing');
   $('btnPause').textContent = s === 'paused' ? '● 再開' : '❚❚ 一時停止';
