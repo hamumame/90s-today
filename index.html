@@ -2,120 +2,497 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>1:1 カメラ録画</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
   body {
-    margin: 0; min-height: 100vh; background: #111; color: #fff;
+    --size: min(calc(100vw - 16px), calc(100vh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    margin: 0; background: #0b0b0c; color: #fff; overflow: hidden;
     font-family: -apple-system, "Hiragino Sans", sans-serif;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 16px; gap: 14px;
+    padding: env(safe-area-inset-top) 8px env(safe-area-inset-bottom);
+    gap: 10px; user-select: none; -webkit-user-select: none;
   }
+  @supports (height: 100dvh) {
+    body { --size: min(calc(100vw - 16px), calc(100dvh - 150px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
+  }
+  /* カメラ枠：画面に入るいちばん大きい正方形 */
   .stage {
-    position: relative; width: min(92vw, 68vh); aspect-ratio: 1 / 1;
-    border-radius: 16px; overflow: hidden; background: #000;
+    position: relative; width: var(--size); height: var(--size); flex: none;
+    border-radius: 10px; overflow: hidden; background: #000; touch-action: none;
   }
   .stage canvas, .stage video { width: 100%; height: 100%; display: block; object-fit: cover; }
   #playback { display: none; }
-  .badge {
-    position: absolute; top: 10px; left: 10px; padding: 4px 10px; border-radius: 999px;
-    background: rgba(0,0,0,.55); font-size: 14px; font-variant-numeric: tabular-nums;
+
+  .pill {
+    position: absolute; padding: 5px 12px; border-radius: 999px; background: rgba(0,0,0,.55);
+    font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
     display: flex; align-items: center; gap: 6px;
   }
+  #badge { top: 10px; left: 10px; }
+  #remain { top: 10px; right: 10px; }
+  #remain.low { background: rgba(255,59,48,.9); }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: #888; }
   .rec .dot { background: #ff3b30; animation: blink 1s infinite; }
   .paused .dot { background: #ffcc00; }
   @keyframes blink { 50% { opacity: .2; } }
-  .remain {
-    position: absolute; top: 10px; right: 10px; padding: 4px 12px; border-radius: 999px;
-    background: rgba(0,0,0,.55); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
-  }
-  .remain.low { background: rgba(255,59,48,.85); }
+  .progress { position: absolute; left: 0; bottom: 0; height: 5px; width: 0; background: #ff3b30; }
+
   .flip {
-    position: absolute; right: 10px; bottom: 16px; width: 52px; height: 52px; min-width: 0;
-    padding: 0; border-radius: 50%; background: rgba(0,0,0,.55); font-size: 24px;
+    position: absolute; right: 12px; bottom: 18px; width: 54px; height: 54px;
+    border-radius: 50%; border: none; background: rgba(0,0,0,.55); color: #fff; font-size: 26px;
   }
-  .bar { position: absolute; left: 0; bottom: 0; height: 5px; width: 0; background: #ff3b30; }
-  .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-  button {
-    border: none; border-radius: 999px; padding: 14px 22px; font-size: 16px; font-weight: 600;
-    background: #2c2c2e; color: #fff; min-width: 96px;
+  /* ズーム */
+  .zoom {
+    position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(0,0,0,.55);
   }
-  button.primary { background: #ff3b30; }
+  .zoom button {
+    width: 44px; height: 44px; border-radius: 50%; border: none; background: transparent; color: #fff;
+    font-size: 24px; font-weight: 700;
+  }
+  .zoom #zoomLabel { width: 58px; font-size: 15px; font-variant-numeric: tabular-nums; background: rgba(255,255,255,.12); border-radius: 999px; }
+
+  .notice {
+    position: absolute; left: 50%; top: 52px; transform: translateX(-50%);
+    background: rgba(0,0,0,.7); padding: 8px 14px; border-radius: 10px; font-size: 13px;
+    text-align: center; width: max-content; max-width: 90%;
+  }
+  .busy {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; background: rgba(0,0,0,.6); font-size: 16px; font-weight: 600;
+  }
+
+  /* 操作バー：一時停止は左端、終了は右端 */
+  .controls {
+    width: var(--size); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 72px;
+  }
+  .controls .left { justify-self: start; }
+  .controls .center { justify-self: center; }
+  .controls .right { justify-self: end; }
+  button.ctl {
+    border: none; border-radius: 999px; padding: 15px 20px; font-size: 16px; font-weight: 700;
+    background: #2c2c2e; color: #fff; min-height: 52px;
+  }
+  button.rec-btn {
+    width: 72px; height: 72px; border-radius: 50%; border: 4px solid #fff; background: #ff3b30;
+    padding: 0; font-size: 0;
+  }
+  button.stop-btn { background: #3a3a3c; }
   button.save { background: #0a84ff; }
+  button.danger { background: #ff3b30; }
   button:disabled { opacity: .35; }
+  .done-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
   .hidden { display: none !important; }
-  #msg { font-size: 13px; color: #aaa; text-align: center; min-height: 1em; max-width: 92vw; }
+  #msg { font-size: 12px; color: #999; text-align: center; min-height: 1em; max-width: 92vw; }
+
+  .sheet-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); z-index: 10;
+  }
+  .sheet { width: min(420px, 100%); background: #1c1c1e; border-radius: 16px; padding: 20px; text-align: center; }
+  .sheet h2 { margin: 0 0 6px; font-size: 18px; }
+  .sheet p { margin: 0 0 18px; color: #aaa; font-size: 14px; }
+  .sheet .row { display: flex; gap: 10px; }
+  .sheet .row button { flex: 1; }
 </style>
 </head>
 <body>
 
-<div class="stage">
+<div class="stage" id="stage">
   <canvas id="canvas" width="720" height="720"></canvas>
   <video id="playback" playsinline controls></video>
-  <div class="badge" id="badge"><span class="dot"></span><span id="time">0:00</span></div>
-  <div class="remain" id="remain">残り 1:30</div>
+  <div class="pill" id="badge"><span class="dot"></span><span id="time">0:00</span></div>
+  <div class="pill" id="remain">残り 1:30</div>
+  <div class="notice hidden" id="notice"></div>
+  <div class="zoom" id="zoomBox">
+    <button id="zoomOut" aria-label="ズームアウト">−</button>
+    <button id="zoomLabel" aria-label="ズームを戻す">1.0x</button>
+    <button id="zoomIn" aria-label="ズーム">＋</button>
+  </div>
   <button class="flip" id="btnSwitch" title="カメラ切替">↺</button>
-  <div class="bar" id="bar"></div>
+  <div class="busy hidden" id="busy"><div id="busyText">動画を仕上げています…</div><div id="busyPct"></div></div>
+  <div class="progress" id="progress"></div>
 </div>
 
-<div class="controls">
-  <button id="btnStart" class="primary">● 録画開始</button>
-  <button id="btnPause" class="hidden">❚❚ 一時停止</button>
-  <button id="btnStop" class="hidden">■ 終了</button>
-  <button id="btnShare" class="save hidden">写真に保存／共有</button>
-  <button id="btnSave" class="save hidden">ダウンロード</button>
-  <button id="btnRetake" class="hidden">撮り直す</button>
+<div class="controls" id="controls">
+  <div class="left"><button class="ctl hidden" id="btnPause">❚❚ 一時停止</button></div>
+  <div class="center"><button class="rec-btn" id="btnStart" aria-label="録画開始" disabled>録画開始</button></div>
+  <div class="right"><button class="ctl stop-btn hidden" id="btnStop">■ 終了</button></div>
+</div>
+<div class="done-row hidden" id="doneRow">
+  <button class="ctl save hidden" id="btnShare">写真に保存／共有</button>
+  <button class="ctl save" id="btnSave">ダウンロード</button>
+  <button class="ctl" id="btnRetake">撮り直す</button>
 </div>
 <div id="msg"></div>
 
-<!-- カメラの生映像（非表示。canvasで正方形に切り抜いて表示・録画します） -->
+<div class="sheet-bg hidden" id="sheet">
+  <div class="sheet">
+    <h2 id="sheetTitle">録画を終了しますか？</h2>
+    <p id="sheetText">終了すると動画が完成し、続きは撮れなくなります。</p>
+    <div class="row">
+      <button class="ctl" id="btnBack">撮影に戻る</button>
+      <button class="ctl danger" id="btnConfirm">終了する</button>
+    </div>
+  </div>
+</div>
+
+<!-- カメラの生映像（非表示） -->
 <video id="cam" playsinline muted autoplay style="display:none"></video>
 
 <script>
-const MAX_MS = 90 * 1000; // 最大録画時間 1:30
+{
+// ================= 設定 =================
+const MAX_MS = 90 * 1000;   // 最大録画時間 1:30
+const OUT = 360;            // 書き出しサイズ 360×360（1:1の360p）
+const FPS = 25;             // 書き出しフレームレート
+const FRAME_US = 1e6 / FPS;
+const V_BITRATE = 1_000_000;
+const A_BITRATE = 96_000;
+const ZOOM_MIN = 1, ZOOM_MAX = 5;
+const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js';
 
-const cam = document.getElementById('cam');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const playback = document.getElementById('playback');
 const $ = id => document.getElementById(id);
+const cam = $('cam'), canvas = $('canvas'), ctx = canvas.getContext('2d'), playback = $('playback');
+// 録画用の小さいキャンバス（360×360）。画面表示は大きいキャンバスで綺麗に
+const recCanvas = document.createElement('canvas');
+recCanvas.width = recCanvas.height = OUT;
+const rctx = recCanvas.getContext('2d');
 
-let videoStream = null;     // カメラ（切り替えるたびに差し替え）
-let audioStream = null;     // マイク（録画中ずっと同じものを使う）
-let facing = 'user';        // 'user'=インカメラ / 'environment'=背面
-let drawMirror = true;      // 実際に表示中の映像を鏡写しにするか
-let switching = false;
-let recorder = null;
-let chunks = [];
-let state = 'idle';         // idle | recording | paused | done
-let elapsed = 0;            // 実際に録画した時間（停止中は加算しない）
-let lastTick = 0;
-let videoBlob = null;
-let blobUrl = null;
-let fileExt = 'webm';
+let videoStream = null, audioStream = null;
+let audioCtx = null, capNode = null;
+let facing = 'user', drawMirror = true, switching = false;
+let zoom = 1;
+let state = 'idle';         // idle | recording | paused | finishing | done
+let elapsed = 0, lastTick = 0;
+let resumeAfterBack = false;
+let pending = [];
+let videoBlob = null, blobUrl = null, fileExt = 'mp4';
+let engine = 'mr';          // 'wc' = 高速（WebCodecs） / 'mr' = 互換（MediaRecorder）
 
-// ---------- マイク ----------
-async function startMic() {
-  try {
-    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    audioStream = null;
-    $('msg').textContent = 'マイクが使えないため、音声なしで録画します。';
+// ================= 端末内保存（IndexedDB） =================
+const DB = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('square-recorder', 2);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (d.objectStoreNames.contains('chunks')) d.deleteObjectStore('chunks');
+      if (d.objectStoreNames.contains('meta')) d.deleteObjectStore('meta');
+      d.createObjectStore('chunks', { autoIncrement: true });
+      d.createObjectStore('meta');
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  const tx = async (name, mode, fn) => {
+    const d = await open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(name, mode);
+      const req = fn(t.objectStore(name));
+      t.oncomplete = () => res(req ? req.result : undefined);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  return {
+    add: v => tx('chunks', 'readwrite', s => s.add(v)),
+    all: () => tx('chunks', 'readonly', s => s.getAll()),
+    set: (k, v) => tx('meta', 'readwrite', s => s.put(v, k)),
+    get: k => tx('meta', 'readonly', s => s.get(k)),
+    clear: () => Promise.all([tx('chunks', 'readwrite', s => s.clear()), tx('meta', 'readwrite', s => s.clear())])
+  };
+})();
+const keep = p => pending.push(Promise.resolve(p).catch(() => {}));
+// 書き込み待ちを、途中で増えた分も含めてすべて待つ
+async function drain() { while (pending.length) { const p = pending; pending = []; await Promise.all(p); } }
+
+// ================= 高速エンジン（WebCodecs + MP4） =================
+// フレームに「録画した時間」でタイムスタンプを付けて直接エンコード。
+// 一時停止や開き直しがあっても、終了時はデータを並べて包むだけなので一瞬で完成します。
+const WC = {
+  vCodec: null, vEnc: null, aEnc: null, vcfg: null, acfg: null,
+  v: [], a: [], frameIndex: 0, nextFrameUs: 0, needKey: true,
+  audioBaseUs: 0, audioSamples: 0, lastAudioEndUs: 0,
+
+  async supported() {
+    try {
+      if (!window.VideoEncoder || !window.VideoFrame) return false;
+      await loadScript(MUXER_URL);
+      if (!window.Mp4Muxer) return false;
+      for (const codec of ['avc1.42001f', 'avc1.4d001f', 'avc1.64001f']) {
+        const r = await VideoEncoder.isConfigSupported(this.vConfig(codec));
+        if (r.supported) { this.vCodec = codec; break; }
+      }
+      if (!this.vCodec) return false;
+      if (audioStream) {
+        if (!window.AudioEncoder || !window.AudioData || !capNode) return false;
+        const r = await AudioEncoder.isConfigSupported(this.aConfig());
+        if (!r.supported) return false;
+      }
+      return true;
+    } catch (e) { return false; }
+  },
+  vConfig(codec) {
+    return { codec, width: OUT, height: OUT, bitrate: V_BITRATE, framerate: FPS, avc: { format: 'avc' } };
+  },
+  aConfig() {
+    return { codec: 'mp4a.40.2', sampleRate: audioCtx.sampleRate, numberOfChannels: 1, bitrate: A_BITRATE };
+  },
+  ensureEncoders() {
+    if (!this.vEnc) {
+      this.vEnc = new VideoEncoder({
+        output: (chunk, meta) => {
+          if (meta && meta.decoderConfig && !this.vcfg) { this.vcfg = meta.decoderConfig; saveSession(); }
+          const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d);
+          const c = { k: 'v', t: chunk.type, ts: chunk.timestamp, du: chunk.duration || FRAME_US, d };
+          this.v.push(c); keep(DB.add(c));
+        },
+        error: e => { $('msg').textContent = '映像エンコードのエラー：' + e.message; }
+      });
+      this.vEnc.configure(this.vConfig(this.vCodec));
+      this.needKey = true;
+    }
+    if (audioStream && !this.aEnc) {
+      this.aEnc = new AudioEncoder({
+        output: (chunk, meta) => {
+          if (meta && meta.decoderConfig && !this.acfg) { this.acfg = meta.decoderConfig; saveSession(); }
+          const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d);
+          const c = { k: 'a', t: chunk.type, ts: chunk.timestamp, du: chunk.duration || 0, d };
+          this.a.push(c); keep(DB.add(c));
+        },
+        error: e => { $('msg').textContent = '音声エンコードのエラー：' + e.message; }
+      });
+      this.aEnc.configure(this.aConfig());
+    }
+  },
+  start() { this.v = []; this.a = []; this.vcfg = this.acfg = null; this.frameIndex = 0; this.nextFrameUs = 0; this.lastAudioEndUs = 0; this.resume(); },
+  resume() {
+    this.ensureEncoders();
+    this.needKey = true;
+    this.audioBaseUs = Math.max(elapsed * 1000, this.lastAudioEndUs);
+    this.audioSamples = 0;
+    this.nextFrameUs = Math.max(this.nextFrameUs, Math.ceil(elapsed * 1000 / FRAME_US) * FRAME_US);
+  },
+  pause() {
+    if (this.vEnc && this.vEnc.state === 'configured') keep(this.vEnc.flush());
+    if (this.aEnc && this.aEnc.state === 'configured') keep(this.aEnc.flush());
+  },
+  tick() { // 描画ごとに呼ばれ、25fps分のフレームをエンコード
+    const nowUs = elapsed * 1000;
+    let n = 0;
+    while (this.nextFrameUs <= nowUs && n < 3) {
+      if (this.vEnc.encodeQueueSize < 10) {
+        const f = new VideoFrame(recCanvas, { timestamp: Math.round(this.nextFrameUs), duration: Math.round(FRAME_US) });
+        this.vEnc.encode(f, { keyFrame: this.needKey || this.frameIndex % (FPS * 2) === 0 });
+        f.close();
+        this.needKey = false; this.frameIndex++;
+      }
+      this.nextFrameUs += FRAME_US; n++;
+    }
+    if (this.nextFrameUs <= nowUs) this.nextFrameUs = Math.ceil(nowUs / FRAME_US) * FRAME_US;
+  },
+  onAudio(buf) {
+    if (!this.aEnc || this.aEnc.state !== 'configured') return;
+    const sr = audioCtx.sampleRate;
+    let ts = this.audioBaseUs + Math.round(this.audioSamples * 1e6 / sr);
+    if (ts < this.lastAudioEndUs) ts = Math.round(this.lastAudioEndUs);
+    const ad = new AudioData({ format: 'f32', sampleRate: sr, numberOfFrames: buf.length, numberOfChannels: 1, timestamp: ts, data: buf });
+    this.aEnc.encode(ad); ad.close();
+    this.audioSamples += buf.length;
+    this.lastAudioEndUs = ts + buf.length * 1e6 / sr;
+  },
+  restore(rows, s) {
+    this.vcfg = s.vcfg || null; this.acfg = s.acfg || null;
+    this.v = rows.filter(r => r.k === 'v');
+    this.a = rows.filter(r => r.k === 'a');
+    this.frameIndex = this.v.length;
+    const lastV = this.v.reduce((m, c) => Math.max(m, c.ts + c.du), 0);
+    this.nextFrameUs = Math.ceil(Math.max(lastV, elapsed * 1000) / FRAME_US) * FRAME_US;
+    this.lastAudioEndUs = this.a.reduce((m, c) => Math.max(m, c.ts + c.du), 0);
+    return this.v.length > 0;
+  },
+  async finish() {
+    this.pause();
+    await drain();
+    try { this.vEnc && this.vEnc.close(); } catch (e) {}
+    try { this.aEnc && this.aEnc.close(); } catch (e) {}
+    this.vEnc = this.aEnc = null;
+
+    const v = this.v.slice().sort((x, y) => x.ts - y.ts);
+    while (v.length && v[0].t !== 'key') v.shift();
+    const useAudio = this.a.length > 0 && this.acfg;
+    const a = useAudio ? this.a.slice().sort((x, y) => x.ts - y.ts) : [];
+    const M = window.Mp4Muxer;
+    const muxer = new M.Muxer({
+      target: new M.ArrayBufferTarget(),
+      video: { codec: 'avc', width: OUT, height: OUT, frameRate: FPS },
+      audio: useAudio ? { codec: 'aac', numberOfChannels: 1, sampleRate: this.acfg.sampleRate } : undefined,
+      fastStart: 'in-memory',
+      firstTimestampBehavior: 'offset'
+    });
+    let i = 0, j = 0, firstV = true, firstA = true;
+    while (i < v.length || j < a.length) {
+      if (j >= a.length || (i < v.length && v[i].ts <= a[j].ts)) {
+        const c = v[i++];
+        muxer.addVideoChunkRaw(c.d, c.t, c.ts, c.du, firstV ? { decoderConfig: this.vcfg } : undefined);
+        firstV = false;
+      } else {
+        const c = a[j++];
+        muxer.addAudioChunkRaw(c.d, c.t, c.ts, c.du, firstA ? { decoderConfig: this.acfg } : undefined);
+        firstA = false;
+      }
+    }
+    muxer.finalize();
+    return new Blob([muxer.target.buffer], { type: 'video/mp4' });
   }
+};
+
+// ================= 互換エンジン（MediaRecorder） =================
+// 高速エンジンが使えないブラウザ用。開き直した場合のみ、終了時に再生しながら1本にまとめます。
+const MR = {
+  rec: null, segments: [], mem: {},
+  mime() {
+    const list = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    return list.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+  },
+  make(extraAudio) {
+    const out = recCanvas.captureStream(FPS);
+    (extraAudio || audioStream)?.getAudioTracks().forEach(t => out.addTrack(t));
+    const mime = this.mime();
+    const opt = { videoBitsPerSecond: V_BITRATE, audioBitsPerSecond: A_BITRATE };
+    if (mime) opt.mimeType = mime;
+    return new MediaRecorder(out, opt);
+  },
+  newSegment() {
+    this.rec = this.make();
+    const id = Date.now();
+    this.segments.push({ id, mime: this.rec.mimeType || this.mime() || 'video/webm' });
+    this.mem[id] = [];
+    this.rec.ondataavailable = e => {
+      if (!e.data.size) return;
+      this.mem[id].push(e.data);
+      keep(DB.add({ k: 'm', seg: id, data: e.data }));
+      saveSession();
+    };
+    this.rec.start(1000);
+  },
+  start() { this.segments = []; this.mem = {}; this.newSegment(); },
+  resume() {
+    if (this.rec && this.rec.state === 'paused') this.rec.resume();
+    else this.newSegment();
+  },
+  pause() {
+    if (this.rec && this.rec.state === 'recording') { this.rec.requestData(); this.rec.pause(); }
+  },
+  tick() {},
+  restore(rows, s) {
+    this.segments = s.segments || []; this.mem = {};
+    rows.filter(r => r.k === 'm').forEach(r => (this.mem[r.seg] = this.mem[r.seg] || []).push(r.data));
+    this.segments = this.segments.filter(g => this.mem[g.id] && this.mem[g.id].length);
+    return this.segments.length > 0;
+  },
+  async finish() {
+    if (this.rec && this.rec.state !== 'inactive') {
+      const stopped = new Promise(r => this.rec.addEventListener('stop', r, { once: true }));
+      this.rec.stop(); await stopped;
+    }
+    this.rec = null;
+    await drain();
+    const parts = this.segments.map(g => new Blob(this.mem[g.id], { type: g.mime.split(';')[0] }));
+    if (parts.length === 1) return parts[0];
+    return this.merge(parts);
+  },
+  async merge(parts) {
+    $('busyText').textContent = '動画をつないでいます…';
+    const v = document.createElement('video');
+    v.playsInline = true;
+    v.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(v);
+    mergeVid = v;
+    let dest = null;
+    try {
+      const src = audioCtx.createMediaElementSource(v);
+      dest = audioCtx.createMediaStreamDestination();
+      src.connect(dest);
+    } catch (e) {}
+    const rec = this.make(dest ? dest.stream : null);
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    let doneMs = 0;
+    const tm = setInterval(() => {
+      $('busyPct').textContent = Math.min(99, Math.round((doneMs + v.currentTime * 1000) / elapsed * 100)) + '%';
+    }, 200);
+    for (let i = 0; i < parts.length; i++) {
+      const url = URL.createObjectURL(parts[i]);
+      v.src = url;
+      await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('読み込めない部分があります')); });
+      try { await v.play(); } catch (e) { v.muted = true; await v.play(); }
+      if (i === 0) rec.start(1000); else rec.resume();
+      await new Promise(r => (v.onended = r));
+      rec.pause();
+      if (isFinite(v.duration)) doneMs += v.duration * 1000;
+      URL.revokeObjectURL(url);
+    }
+    const stopped = new Promise(r => (rec.onstop = r));
+    rec.stop(); await stopped;
+    clearInterval(tm);
+    v.remove(); mergeVid = null;
+    return new Blob(chunks, { type: (rec.mimeType || 'video/webm').split(';')[0] });
+  }
+};
+let mergeVid = null;
+const E = () => engine === 'wc' ? WC : MR;
+
+// ================= 共通処理 =================
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = () => rej(new Error('load failed'));
+    document.head.appendChild(s);
+  });
 }
 
-// ---------- カメラ（録画中でも差し替え可能） ----------
+function saveSession() {
+  if (state === 'idle' || state === 'done') return;
+  keep(DB.set('session', {
+    engine, elapsed, facing, zoom,
+    segments: MR.segments, vcfg: WC.vcfg, acfg: WC.acfg
+  }));
+}
+
+async function startMic() {
+  try { audioStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true } }); }
+  catch (e) { audioStream = null; $('msg').textContent = 'マイクが使えないため、音声なしで録画します。'; }
+}
+
+// マイク音声を取り出す仕組み（高速エンジン用）
+async function setupAudio() {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioStream || !audioCtx.audioWorklet) return;
+    const code = `class C extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(2048);this.n=0}
+      process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.n++]=c[k];
+      if(this.n===2048){this.port.postMessage(this.b,[this.b.buffer]);this.b=new Float32Array(2048);this.n=0}}}return true}}
+      registerProcessor('cap',C);`;
+    const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+    await audioCtx.audioWorklet.addModule(url);
+    const src = audioCtx.createMediaStreamSource(audioStream);
+    capNode = new AudioWorkletNode(audioCtx, 'cap');
+    const mute = audioCtx.createGain(); mute.gain.value = 0; // スピーカーには出さない
+    src.connect(capNode); capNode.connect(mute); mute.connect(audioCtx.destination);
+    capNode.port.onmessage = e => { if (state === 'recording' && engine === 'wc') WC.onAudio(e.data); };
+  } catch (e) { capNode = null; }
+}
+
 async function startCamera() {
-  switching = true;
-  $('btnSwitch').disabled = true;
-  // iPhoneは2台同時に開けないことがあるので、先に今のカメラを止める
+  switching = true; $('btnSwitch').disabled = true;
   if (videoStream) videoStream.getTracks().forEach(t => t.stop());
   try {
     videoStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 1280 } },
-      audio: false
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false
     });
     cam.srcObject = videoStream;
     await cam.play();
@@ -123,162 +500,219 @@ async function startCamera() {
   } catch (e) {
     $('msg').textContent = 'カメラを起動できませんでした：' + e.message + '（HTTPSで開いているか、許可を確認してください）';
   }
-  switching = false;
-  $('btnSwitch').disabled = false;
+  switching = false; $('btnSwitch').disabled = false;
 }
 
 function switchCamera() {
-  if (switching || state === 'done') return;
+  if (switching || state === 'done' || state === 'finishing') return;
   facing = facing === 'user' ? 'environment' : 'user';
+  saveSession();
   startCamera();
 }
 
-// ---------- 描画ループ：中央を正方形に切り抜き ----------
+// ---------- ズーム ----------
+function setZoom(z) {
+  zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+  $('zoomLabel').textContent = zoom.toFixed(1) + 'x';
+}
+const stage = $('stage');
+let pinch = null;
+const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+stage.addEventListener('touchstart', e => {
+  if (e.touches.length === 2 && state !== 'done') pinch = { d: dist(e.touches), z: zoom };
+}, { passive: true });
+stage.addEventListener('touchmove', e => {
+  if (pinch && e.touches.length === 2) { e.preventDefault(); setZoom(pinch.z * dist(e.touches) / pinch.d); }
+}, { passive: false });
+stage.addEventListener('touchend', e => { if (e.touches.length < 2) { if (pinch) saveSession(); pinch = null; } });
+stage.addEventListener('wheel', e => { if (state === 'done') return; e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1)); }, { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault()); // iPhoneのページ拡大を防ぐ
+$('zoomIn').onclick = () => { setZoom(Math.round((zoom + 0.5) * 2) / 2); saveSession(); };
+$('zoomOut').onclick = () => { setZoom(Math.round((zoom - 0.5) * 2) / 2); saveSession(); };
+$('zoomLabel').onclick = () => { setZoom(1); saveSession(); };
+
+// ---------- 描画ループ ----------
 function draw(now) {
-  const vw = cam.videoWidth, vh = cam.videoHeight;
-  // 切り替え中は最後のコマが残るので、録画が途切れません
-  if (!switching && vw && vh) {
-    const s = Math.min(vw, vh);
-    const sx = (vw - s) / 2, sy = (vh - s) / 2;
+  if (mergeVid) {
+    if (mergeVid.videoWidth) {
+      rctx.drawImage(mergeVid, 0, 0, OUT, OUT);
+      ctx.drawImage(mergeVid, 0, 0, canvas.width, canvas.height);
+    }
+  } else if (!switching && cam.videoWidth && cam.videoHeight) {
+    const vw = cam.videoWidth, vh = cam.videoHeight;
+    const s = Math.min(vw, vh) / zoom; // ズームは中央を小さく切り抜く
     ctx.save();
     if (drawMirror) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
-    ctx.drawImage(cam, sx, sy, s, s, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(cam, (vw - s) / 2, (vh - s) / 2, s, s, 0, 0, canvas.width, canvas.height);
     ctx.restore();
+    rctx.drawImage(canvas, 0, 0, OUT, OUT);
   }
-
-  // 録画中だけ時間を進める
   if (state === 'recording') {
-    elapsed += now - lastTick;
-    if (elapsed >= MAX_MS) { elapsed = MAX_MS; stopRecording(); }
+    elapsed = Math.min(MAX_MS, elapsed + (now - lastTick));
+    E().tick();
+    if (elapsed >= MAX_MS) reachMax();
   }
   lastTick = now;
   updateTimer();
   requestAnimationFrame(draw);
 }
 
-function fmt(ms) {
-  const sec = Math.floor(ms / 1000);
-  return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
-}
+const fmt = ms => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 function updateTimer() {
   const remain = MAX_MS - elapsed;
   $('time').textContent = fmt(elapsed);
   $('remain').textContent = '残り ' + fmt(Math.ceil(remain / 1000) * 1000);
   $('remain').classList.toggle('low', remain <= 10000 && state !== 'idle');
-  $('bar').style.width = (elapsed / MAX_MS * 100) + '%';
+  $('progress').style.width = (elapsed / MAX_MS * 100) + '%';
 }
+function showNotice(t) { $('notice').textContent = t; $('notice').classList.toggle('hidden', !t); }
 
-// ---------- 録画 ----------
-function pickMime() {
-  const list = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-  return list.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
-}
-
-function startRecording() {
+// ---------- 録画操作 ----------
+async function startRecording() {
   if (!videoStream) return;
-  const out = canvas.captureStream(30);
-  if (audioStream) audioStream.getAudioTracks().forEach(t => out.addTrack(t));
-
-  const mime = pickMime();
-  fileExt = mime.includes('mp4') ? 'mp4' : 'webm';
-  recorder = new MediaRecorder(out, mime ? { mimeType: mime } : undefined);
-  chunks = [];
-  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  recorder.onstop = showResult;
-  recorder.start(1000);
-
+  if (audioCtx) audioCtx.resume();
+  try { await DB.clear(); } catch (e) {}
   elapsed = 0;
+  state = 'recording';
+  E().start();
   lastTick = performance.now();
-  $('msg').textContent = '';
+  showNotice(''); $('msg').textContent = '';
+  setState('recording');
+  saveSession();
+}
+
+function pause() {
+  if (state !== 'recording') return;
+  E().pause();
+  setState('paused');
+  saveSession();
+}
+
+function resume() {
+  if (state !== 'paused') return;
+  if (audioCtx) audioCtx.resume();
+  E().resume();
+  lastTick = performance.now(); // 止めていた時間は数えない
+  showNotice('');
   setState('recording');
 }
+const togglePause = () => state === 'recording' ? pause() : resume();
 
-function togglePause() {
-  if (state === 'recording') {
-    recorder.pause();
-    setState('paused');
-  } else if (state === 'paused') {
-    recorder.resume();
-    lastTick = performance.now(); // 停止していた時間は数えない
-    setState('recording');
-  }
+function askStop() {
+  resumeAfterBack = (state === 'recording');
+  pause();
+  $('sheetTitle').textContent = '録画を終了しますか？';
+  $('sheetText').textContent = '終了すると動画が完成し、続きは撮れなくなります。';
+  $('btnBack').classList.remove('hidden');
+  $('sheet').classList.remove('hidden');
+}
+function reachMax() {
+  pause();
+  resumeAfterBack = false;
+  $('sheetTitle').textContent = '最大時間（1:30）に達しました';
+  $('sheetText').textContent = '「終了する」を押すと動画が完成します。';
+  $('btnBack').classList.add('hidden');
+  $('sheet').classList.remove('hidden');
+}
+function back() {
+  $('sheet').classList.add('hidden');
+  if (resumeAfterBack) resume();
 }
 
-function stopRecording() {
-  if (recorder && recorder.state !== 'inactive') recorder.stop();
-  setState('done');
+async function finalize() {
+  $('sheet').classList.add('hidden');
+  if (audioCtx) audioCtx.resume();
+  setState('finishing');
+  $('busyText').textContent = '動画を仕上げています…'; $('busyPct').textContent = '';
+  $('busy').classList.remove('hidden');
+  let blob = null;
+  try { blob = await E().finish(); }
+  catch (e) { $('msg').textContent = '仕上げに失敗しました：' + e.message; }
+  $('busy').classList.add('hidden');
+  if (!blob) { setState('paused'); return; }
+  try { await DB.clear(); await DB.set('final', { blob }); } catch (e) {}
+  showResult(blob);
 }
 
-function showResult() {
-  const type = (recorder.mimeType || 'video/webm').split(';')[0];
-  videoBlob = new Blob(chunks, { type });
+function showResult(blob) {
+  videoBlob = blob;
+  fileExt = (blob.type || '').includes('mp4') ? 'mp4' : 'webm';
   if (blobUrl) URL.revokeObjectURL(blobUrl);
-  blobUrl = URL.createObjectURL(videoBlob);
+  blobUrl = URL.createObjectURL(blob);
   playback.src = blobUrl;
   playback.style.display = 'block';
   canvas.style.display = 'none';
-
-  // 共有シートに動画を渡せる端末（主にスマホ）だけ「写真に保存／共有」を出す
-  const file = makeFile();
-  const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+  setState('done');
+  const canShare = navigator.canShare && navigator.canShare({ files: [makeFile()] });
   $('btnShare').classList.toggle('hidden', !canShare);
 }
 
 function makeFile() {
   const name = 'video_' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.' + fileExt;
-  return new File([videoBlob], name, { type: videoBlob.type });
+  return new File([videoBlob], name, { type: videoBlob.type || 'video/' + fileExt });
 }
-
-// iPhone：共有シート →「ビデオを保存」で写真アプリへ / Android：ギャラリーやアプリへ
 async function share() {
-  try {
-    await navigator.share({ files: [makeFile()] });
-  } catch (e) {
-    if (e.name !== 'AbortError') { $('msg').textContent = '共有できなかったので、ダウンロードします。'; download(); }
-  }
+  try { await navigator.share({ files: [makeFile()] }); }
+  catch (e) { if (e.name !== 'AbortError') { $('msg').textContent = '共有できなかったので、ダウンロードします。'; download(); } }
 }
-
-// ファイルとして保存（PCや、共有に対応していないブラウザ向け）
 function download() {
-  const file = makeFile();
   const a = document.createElement('a');
-  a.href = blobUrl;
-  a.download = file.name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  a.href = blobUrl; a.download = makeFile().name;
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
-function retake() {
-  playback.pause();
-  playback.style.display = 'none';
-  canvas.style.display = 'block';
-  elapsed = 0;
-  $('msg').textContent = '';
+async function retake() {
+  try { await DB.clear(); } catch (e) {}
+  playback.pause(); playback.removeAttribute('src');
+  playback.style.display = 'none'; canvas.style.display = 'block';
+  elapsed = 0; setZoom(1);
+  $('msg').textContent = ''; showNotice('');
   setState('idle');
 }
 
-// ---------- 画面の状態切替 ----------
+// ---------- 開き直したときの復元 ----------
+async function restore() {
+  try {
+    const final = await DB.get('final');
+    if (final && final.blob) { showResult(final.blob); return; }
+    const s = await DB.get('session');
+    if (!s || !s.elapsed) return;
+    if (s.engine === 'wc' && engine !== 'wc') return; // この環境では続きを作れない
+    engine = s.engine || engine;
+    elapsed = s.elapsed; facing = s.facing || facing; setZoom(s.zoom || 1);
+    const rows = await DB.all();
+    if (!E().restore(rows, s)) { elapsed = 0; return; }
+    setState('paused');
+    showNotice('前回の続きから撮影できます。「● 再開」を押してください');
+  } catch (e) {
+    $('msg').textContent = 'このブラウザでは途中保存が使えないため、閉じると録画が消えます。';
+  }
+}
+
+// ---------- 画面の状態 ----------
 function setState(s) {
   state = s;
-  const badge = $('badge');
-  badge.classList.toggle('rec', s === 'recording');
-  badge.classList.toggle('paused', s === 'paused');
-
+  $('badge').classList.toggle('rec', s === 'recording');
+  $('badge').classList.toggle('paused', s === 'paused');
   const active = (s === 'recording' || s === 'paused');
+  $('controls').classList.toggle('hidden', s === 'done' || s === 'finishing');
+  $('doneRow').classList.toggle('hidden', s !== 'done');
   $('btnStart').classList.toggle('hidden', s !== 'idle');
-  $('btnSwitch').classList.toggle('hidden', s === 'done'); // 録画中も切替できる
   $('btnPause').classList.toggle('hidden', !active);
   $('btnStop').classList.toggle('hidden', !active);
-  $('btnSave').classList.toggle('hidden', s !== 'done');
-  $('btnRetake').classList.toggle('hidden', s !== 'done');
-  if (s !== 'done') $('btnShare').classList.add('hidden');
+  $('btnSwitch').classList.toggle('hidden', s === 'done' || s === 'finishing');
+  $('zoomBox').classList.toggle('hidden', s === 'done' || s === 'finishing');
   $('btnPause').textContent = s === 'paused' ? '● 再開' : '❚❚ 一時停止';
 }
 
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+window.addEventListener('pagehide', pause);
+
 $('btnStart').onclick = startRecording;
 $('btnPause').onclick = togglePause;
-$('btnStop').onclick = stopRecording;
+$('btnStop').onclick = askStop;
+$('btnBack').onclick = back;
+$('btnConfirm').onclick = finalize;
 $('btnShare').onclick = share;
 $('btnSave').onclick = download;
 $('btnRetake').onclick = retake;
@@ -286,9 +720,16 @@ $('btnSwitch').onclick = switchCamera;
 
 (async () => {
   await startMic();
+  await setupAudio();
   await startCamera();
+  engine = (await WC.supported()) ? 'wc' : 'mr';
+  const f0 = facing;
+  await restore();
+  if (facing !== f0) await startCamera(); // 前回のカメラ向きに合わせる
+  $('btnStart').disabled = false;
 })();
 requestAnimationFrame(t => { lastTick = t; draw(t); });
+}
 </script>
 </body>
 </html>
