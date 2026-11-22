@@ -3,135 +3,198 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
 <title>1:1 カメラ録画</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
   body {
-    --size: min(calc(100vw - 16px), calc(100vh - 212px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
-    margin: 0; background: #0b0b0c; color: #fff; overflow: hidden;
-    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    --size: min(calc(100vw - 16px), calc(100vh - 214px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    margin: 0; background: #000; color: #fff; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     padding: env(safe-area-inset-top) 8px env(safe-area-inset-bottom);
-    gap: 10px; user-select: none; -webkit-user-select: none;
+    gap: 8px; user-select: none; -webkit-user-select: none;
   }
   @supports (height: 100dvh) {
-    body { --size: min(calc(100vw - 16px), calc(100dvh - 212px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
+    body { --size: min(calc(100vw - 16px), calc(100dvh - 214px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
   }
-  /* カメラ枠：画面に入るいちばん大きい正方形 */
+  button { font: inherit; color: inherit; border: none; background: none; cursor: pointer; }
+  button:disabled { opacity: .35; }
+  svg { display: block; }
+  .hidden { display: none !important; }
+  .invisible { visibility: hidden; }
+
+  /* ---------- 上のバー ---------- */
+  .topbar {
+    width: var(--size); height: 56px; flex: none;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  }
+  .tb-left { justify-self: start; display: flex; gap: 8px; }
+  .tb-right { justify-self: end; }
+  .chip {
+    height: 40px; padding: 0 14px; border-radius: 999px; background: #1c1c1e;
+    display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600;
+  }
+  .chip.stop { background: #2c2c2e; }
+  .chip.stop .sq { width: 12px; height: 12px; border-radius: 2px; background: #ff3b30; }
+  .mic { padding: 0 12px; }
+  .mic .lvl { width: 26px; height: 6px; border-radius: 3px; background: #3a3a3c; overflow: hidden; }
+  .mic .lvl i { display: block; height: 100%; width: 0; background: #30d158; transition: width .08s; }
+  .mic.off { background: #3a1513; color: #ff6b61; }
+  .mic.off .lvl { display: none; }
+
+  .timer { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+  .clock {
+    display: flex; align-items: center; gap: 7px; padding: 4px 12px; border-radius: 8px;
+    font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  }
+  .rec .clock { background: #ff3b30; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #8e8e93; }
+  .rec .dot { background: #fff; animation: blink 1s infinite; }
+  .paused .dot { background: #ffd60a; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .remain { margin-top: 3px; font-size: 12px; color: #aeaeb2; font-variant-numeric: tabular-nums; }
+  .remain.low { color: #ff6b61; font-weight: 700; }
+
+  /* ---------- カメラ枠 ---------- */
   .stage {
     position: relative; width: var(--size); height: var(--size); flex: none;
-    border-radius: 10px; overflow: hidden; background: #000; touch-action: none;
+    border-radius: 6px; overflow: hidden; background: #111; touch-action: none;
   }
   .stage canvas, .stage video { width: 100%; height: 100%; display: block; object-fit: cover; }
-  #playback { display: none; }
-
-  .pill {
-    position: absolute; padding: 5px 12px; border-radius: 999px; background: rgba(0,0,0,.55);
-    font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
-    display: flex; align-items: center; gap: 6px;
-  }
-  #badge { top: 10px; left: 10px; }
-  #remain { top: 10px; right: 10px; }
-  #remain.low { background: rgba(255,59,48,.9); }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: #888; }
-  .rec .dot { background: #ff3b30; animation: blink 1s infinite; }
-  .paused .dot { background: #ffcc00; }
-  @keyframes blink { 50% { opacity: .2; } }
-  .progress { position: absolute; left: 0; bottom: 0; height: 5px; width: 0; background: #ff3b30; }
-
-  .flip {
-    position: absolute; right: 12px; bottom: 18px; width: 54px; height: 54px;
-    border-radius: 50%; border: none; background: rgba(0,0,0,.55); color: #fff; font-size: 26px;
-  }
-  /* ズーム */
-  .zoom {
-    position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(0,0,0,.55);
-  }
-  .zoom button {
-    width: 44px; height: 44px; border-radius: 50%; border: none; background: transparent; color: #fff;
-    font-size: 24px; font-weight: 700;
-  }
-  .zoom #zoomLabel { width: 58px; font-size: 15px; font-variant-numeric: tabular-nums; background: rgba(255,255,255,.12); border-radius: 999px; }
-
+  #playback { display: none; background: #000; }
+  .progress { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: #ff3b30; }
   .notice {
-    position: absolute; left: 50%; top: 52px; transform: translateX(-50%);
-    background: rgba(0,0,0,.7); padding: 8px 14px; border-radius: 10px; font-size: 13px;
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    background: rgba(0,0,0,.65); padding: 8px 14px; border-radius: 10px; font-size: 13px;
     text-align: center; width: max-content; max-width: 90%;
+  }
+  .zoom {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,.45);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .zoom button { width: 40px; height: 40px; border-radius: 50%; font-size: 22px; font-weight: 500; }
+  .zoom #zoomLabel {
+    width: 54px; font-size: 14px; font-weight: 700; color: #ffd60a; font-variant-numeric: tabular-nums;
+    background: rgba(255,255,255,.1); border-radius: 999px;
   }
   .busy {
     position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; background: rgba(0,0,0,.6); font-size: 16px; font-weight: 600;
   }
+  .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,.25); border-top-color: #fff; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* 上のバー：撮り直す（左）・終了（右） */
-  .topbar { width: var(--size); display: flex; justify-content: space-between; align-items: center; min-height: 52px; }
-  /* 下のバー：一時停止／再開・録画開始 */
-  .controls {
-    width: var(--size); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 72px;
+  /* ---------- 下のバー：シャッター ---------- */
+  .bottombar {
+    width: var(--size); height: 118px; flex: none;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
   }
-  .controls .left { justify-self: start; }
-  .controls .center { justify-self: center; }
-  .controls .right { justify-self: end; }
-  button.ctl {
-    border: none; border-radius: 999px; padding: 15px 20px; font-size: 16px; font-weight: 700;
-    background: #2c2c2e; color: #fff; min-height: 52px;
+  .bb-center { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .bb-right { justify-self: end; padding-right: 6px; }
+  .shutter {
+    width: 78px; height: 78px; border-radius: 50%; border: 4px solid #fff;
+    display: grid; place-items: center; padding: 0;
   }
-  button.rec-btn {
-    width: 72px; height: 72px; border-radius: 50%; border: 4px solid #fff; background: #ff3b30;
-    padding: 0; font-size: 0;
+  .shutter .core {
+    width: 62px; height: 62px; border-radius: 50%; background: #ff3b30;
+    transition: width .2s, height .2s, border-radius .2s;
   }
-  button.stop-btn { background: #3a3a3c; }
-  button.save { background: #0a84ff; }
-  button.danger { background: #ff3b30; }
-  button:disabled { opacity: .35; }
-  .done-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
-  .hidden { display: none !important; }
-  #msg { font-size: 12px; color: #999; text-align: center; min-height: 1em; max-width: 92vw; }
+  .shutter[data-s=recording] .core { width: 30px; height: 30px; border-radius: 7px; }
+  .shutter[data-s=paused] { border-color: #ffd60a; }
+  .shutter:active .core { transform: scale(.92); }
+  .hint { font-size: 12px; color: #aeaeb2; height: 14px; }
+  .round {
+    width: 50px; height: 50px; border-radius: 50%; background: #1c1c1e;
+    display: grid; place-items: center;
+  }
 
+  .done-row {
+    width: var(--size); height: 118px; flex: none;
+    display: flex; gap: 10px; align-items: center; justify-content: center;
+  }
+  .big {
+    height: 52px; padding: 0 22px; border-radius: 999px; font-size: 16px; font-weight: 700;
+    background: #2c2c2e; display: flex; align-items: center; gap: 8px;
+  }
+  .big.primary { background: #0a84ff; }
+  #msg { font-size: 12px; color: #8e8e93; text-align: center; min-height: 1em; max-width: 92vw; }
+
+  /* ---------- 終了確認 ---------- */
   .sheet-bg {
-    position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center;
-    padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); z-index: 10;
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center;
+    padding: 16px 12px calc(12px + env(safe-area-inset-bottom)); z-index: 10;
   }
-  .sheet { width: min(420px, 100%); background: #1c1c1e; border-radius: 16px; padding: 20px; text-align: center; }
+  .sheet { width: min(420px, 100%); background: #1c1c1e; border-radius: 18px; padding: 22px 18px 18px; text-align: center; }
   .sheet h2 { margin: 0 0 6px; font-size: 18px; }
-  .sheet p { margin: 0 0 18px; color: #aaa; font-size: 14px; }
+  .sheet p { margin: 0 0 18px; color: #aeaeb2; font-size: 14px; }
   .sheet .row { display: flex; gap: 10px; }
-  .sheet .row button { flex: 1; }
+  .sheet .row button { flex: 1; justify-content: center; }
+  .big.danger { background: #ff3b30; }
 </style>
 </head>
 <body>
 
-<div class="topbar" id="topbar">
-  <button class="ctl" id="btnRetake" style="visibility:hidden">↺ 撮り直す</button>
-  <button class="ctl stop-btn hidden" id="btnStop">■ 終了</button>
+<!-- 上：撮り直す・マイク / 時間 / 終了 -->
+<div class="topbar">
+  <div class="tb-left">
+    <button class="chip hidden" id="btnRetake">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+      撮り直す
+    </button>
+    <button class="chip mic" id="micBtn" aria-label="マイク">
+      <svg width="16" height="18" viewBox="0 0 16 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4.5" y="1" width="7" height="11" rx="3.5"/><path d="M1.5 9a6.5 6.5 0 0 0 13 0M8 15.5V19"/><path id="micSlash" class="hidden" d="M1 1l14 18" stroke-width="2.2"/></svg>
+      <span class="lvl"><i id="micLevel"></i></span>
+      <span id="micText" class="hidden">オンにする</span>
+    </button>
+  </div>
+  <div class="timer" id="badge">
+    <div class="clock"><span class="dot"></span><span id="time">0:00</span></div>
+    <div class="remain" id="remain">残り 1:30</div>
+  </div>
+  <div class="tb-right">
+    <button class="chip stop invisible" id="btnStop"><span class="sq"></span>終了</button>
+  </div>
 </div>
 
+<!-- カメラ -->
 <div class="stage" id="stage">
   <canvas id="canvas" width="720" height="720"></canvas>
   <video id="playback" playsinline controls></video>
-  <div class="pill" id="badge"><span class="dot"></span><span id="time">0:00</span></div>
-  <div class="pill" id="remain">残り 1:30</div>
   <div class="notice hidden" id="notice"></div>
   <div class="zoom" id="zoomBox">
     <button id="zoomOut" aria-label="ズームアウト">−</button>
-    <button id="zoomLabel" aria-label="ズームを戻す">1.0x</button>
+    <button id="zoomLabel" aria-label="等倍に戻す">1.0x</button>
     <button id="zoomIn" aria-label="ズーム">＋</button>
   </div>
-  <button class="flip" id="btnSwitch" title="カメラ切替">↺</button>
-  <div class="busy hidden" id="busy"><div id="busyText">動画を仕上げています…</div><div id="busyPct"></div></div>
+  <div class="busy hidden" id="busy"><div class="spinner"></div><div id="busyText">動画を仕上げています…</div><div id="busyPct"></div></div>
   <div class="progress" id="progress"></div>
 </div>
 
-<div class="controls" id="controls">
-  <div class="left"><button class="ctl hidden" id="btnPause">❚❚ 一時停止</button></div>
-  <div class="center"><button class="rec-btn" id="btnStart" aria-label="録画開始" disabled>録画開始</button></div>
-  <div class="right"></div>
+<!-- 下：シャッター（録画・一時停止・再開）とカメラ切替 -->
+<div class="bottombar" id="controls">
+  <div></div>
+  <div class="bb-center">
+    <button class="shutter" id="shutter" data-s="idle" aria-label="録画" disabled><span class="core"></span></button>
+    <div class="hint" id="hint">準備中…</div>
+  </div>
+  <div class="bb-right">
+    <button class="round" id="btnSwitch" aria-label="カメラ切替">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/></svg>
+    </button>
+  </div>
 </div>
 <div class="done-row hidden" id="doneRow">
-  <button class="ctl save hidden" id="btnShare">写真に保存／共有</button>
-  <button class="ctl save" id="btnSave">ダウンロード</button>
+  <button class="big primary hidden" id="btnShare">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+    写真に保存／共有
+  </button>
+  <button class="big" id="btnSave">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+    ダウンロード
+  </button>
 </div>
 <div id="msg"></div>
 
@@ -140,8 +203,8 @@
     <h2 id="sheetTitle">録画を終了しますか？</h2>
     <p id="sheetText">終了すると動画が完成し、続きは撮れなくなります。</p>
     <div class="row">
-      <button class="ctl" id="btnBack">撮影に戻る</button>
-      <button class="ctl danger" id="btnConfirm">終了する</button>
+      <button class="big" id="btnBack">撮影に戻る</button>
+      <button class="big danger" id="btnConfirm">終了する</button>
     </div>
   </div>
 </div>
@@ -163,13 +226,13 @@ const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.
 
 const $ = id => document.getElementById(id);
 const cam = $('cam'), canvas = $('canvas'), ctx = canvas.getContext('2d'), playback = $('playback');
-// 録画用の小さいキャンバス（360×360）。画面表示は大きいキャンバスで綺麗に
+// 録画用の小さいキャンバス（240×240）。画面表示は大きいキャンバスで綺麗に
 const recCanvas = document.createElement('canvas');
 recCanvas.width = recCanvas.height = OUT;
 const rctx = recCanvas.getContext('2d');
 
 let videoStream = null, audioStream = null;
-let audioCtx = null, capNode = null;
+let audioCtx = null, capNode = null, micSrc = null, analyser = null, sink = null;
 let facing = 'environment', drawMirror = false, switching = false;
 let zoom = 1;
 let state = 'idle';         // idle | recording | paused | finishing | done
@@ -178,6 +241,7 @@ let resumeAfterBack = false;
 let pending = [];
 let videoBlob = null, blobUrl = null, fileExt = 'mp4';
 let engine = 'mr';          // 'wc' = 高速（WebCodecs） / 'mr' = 互換（MediaRecorder）
+let ready = false;
 
 // ================= 端末内保存（IndexedDB） =================
 const DB = (() => {
@@ -226,7 +290,7 @@ const WC = {
   async supported() {
     try {
       if (!window.VideoEncoder || !window.VideoFrame) return false;
-      await loadScript(MUXER_URL);
+      if (!window.Mp4Muxer) await loadScript(MUXER_URL);
       if (!window.Mp4Muxer) return false;
       for (const codec of ['avc1.42001f', 'avc1.4d001f', 'avc1.64001f']) {
         const r = await VideoEncoder.isConfigSupported(this.vConfig(codec));
@@ -245,7 +309,7 @@ const WC = {
     return { codec, width: OUT, height: OUT, bitrate: V_BITRATE, framerate: FPS, avc: { format: 'avc' } };
   },
   aConfig() {
-    return { codec: 'mp4a.40.2', sampleRate: audioCtx.sampleRate, numberOfChannels: 1, bitrate: A_BITRATE };
+    return { codec: 'mp4a.40.2', sampleRate: audioCtx.sampleRate, numberOfChannels: 1, bitrate: A_BITRATE, aac: { format: 'aac' } };
   },
   ensureEncoders() {
     if (!this.vEnc) {
@@ -329,6 +393,8 @@ const WC = {
 
     const v = this.v.slice().sort((x, y) => x.ts - y.ts);
     while (v.length && v[0].t !== 'key') v.shift();
+    // 音声の設定情報が届かなかった端末向けに、AACの設定を自前で用意する
+    if (this.a.length && !this.acfg) this.acfg = aacConfig(audioCtx ? audioCtx.sampleRate : 48000);
     const useAudio = this.a.length > 0 && this.acfg;
     const a = useAudio ? this.a.slice().sort((x, y) => x.ts - y.ts) : [];
     const M = window.Mp4Muxer;
@@ -452,6 +518,14 @@ const MR = {
 let mergeVid = null;
 const E = () => engine === 'wc' ? WC : MR;
 
+function aacConfig(sr) {
+  const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
+  let fi = rates.indexOf(sr); if (fi < 0) fi = 3;
+  const ch = 1;
+  const desc = new Uint8Array([(2 << 3) | (fi >> 1), ((fi & 1) << 7) | (ch << 3)]);
+  return { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: ch, description: desc };
+}
+
 // ================= 共通処理 =================
 function loadScript(src) {
   return new Promise((res, rej) => {
@@ -460,6 +534,7 @@ function loadScript(src) {
     document.head.appendChild(s);
   });
 }
+const msg = t => { $('msg').textContent = t || ''; };
 
 function saveSession() {
   if (state === 'idle' || state === 'done') return;
@@ -469,44 +544,127 @@ function saveSession() {
   }));
 }
 
-async function startMic() {
-  try { audioStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true } }); }
-  catch (e) { audioStream = null; $('msg').textContent = 'マイクが使えないため、音声なしで録画します。'; }
+// ---------- カメラ・マイク ----------
+const videoC = () => ({ facingMode: facing, width: { ideal: 1280 }, height: { ideal: 1280 } });
+const AUDIO_C = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+
+function micErrorText(e) {
+  if (!e) return '';
+  if (e.name === 'NotAllowedError' || e.name === 'SecurityError')
+    return 'マイクが許可されていません。アドレスバーの鍵マーク（サイトの設定）からマイクを「許可」にして、ページを開き直してください。';
+  if (e.name === 'NotFoundError') return 'マイクが見つかりませんでした。';
+  if (e.name === 'NotReadableError') return 'マイクを使えませんでした。通話アプリなど、マイクを使っている他のアプリを閉じてください。';
+  return 'マイクを使えませんでした：' + e.message;
 }
 
-// マイク音声を取り出す仕組み（高速エンジン用）
-async function setupAudio() {
+// 最初はカメラとマイクを一度にお願いする（許可が1回で済み、スマホでも安定します）
+async function initMedia() {
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (!audioStream || !audioCtx.audioWorklet) return;
-    const code = `class C extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(2048);this.n=0}
-      process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.n++]=c[k];
-      if(this.n===2048){this.port.postMessage(this.b,[this.b.buffer]);this.b=new Float32Array(2048);this.n=0}}}return true}}
-      registerProcessor('cap',C);`;
-    const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
-    await audioCtx.audioWorklet.addModule(url);
-    const src = audioCtx.createMediaStreamSource(audioStream);
-    capNode = new AudioWorkletNode(audioCtx, 'cap');
-    const mute = audioCtx.createGain(); mute.gain.value = 0; // スピーカーには出さない
-    src.connect(capNode); capNode.connect(mute); mute.connect(audioCtx.destination);
-    capNode.port.onmessage = e => { if (state === 'recording' && engine === 'wc') WC.onAudio(e.data); };
-  } catch (e) { capNode = null; }
+    const s = await navigator.mediaDevices.getUserMedia({ video: videoC(), audio: AUDIO_C });
+    videoStream = new MediaStream(s.getVideoTracks());
+    audioStream = new MediaStream(s.getAudioTracks());
+    await attachVideo();
+  } catch (e) {
+    await startCamera();
+    await startMic(true);
+  }
+}
+
+async function attachVideo() {
+  cam.srcObject = videoStream;
+  await cam.play();
+  drawMirror = (facing === 'user');
 }
 
 async function startCamera() {
   switching = true; $('btnSwitch').disabled = true;
   if (videoStream) videoStream.getTracks().forEach(t => t.stop());
   try {
-    videoStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false
-    });
-    cam.srcObject = videoStream;
-    await cam.play();
-    drawMirror = (facing === 'user');
+    videoStream = await navigator.mediaDevices.getUserMedia({ video: videoC(), audio: false });
+    await attachVideo();
   } catch (e) {
-    $('msg').textContent = 'カメラを起動できませんでした：' + e.message + '（HTTPSで開いているか、許可を確認してください）';
+    msg('カメラを起動できませんでした：' + e.message + '（HTTPSで開いているか、許可を確認してください）');
   }
   switching = false; $('btnSwitch').disabled = false;
+  // カメラを開き直したときにマイクが止められてしまう端末があるので確認
+  if (audioStream && audioStream.getAudioTracks().every(t => t.readyState === 'ended')) await startMic(false);
+}
+
+async function startMic(showErr) {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_C });
+    if (audioStream) audioStream.getTracks().forEach(t => t.stop());
+    audioStream = s;
+    connectMic();
+    msg('');
+  } catch (e) {
+    audioStream = null;
+    if (showErr) msg(micErrorText(e));
+  }
+  updateMicUI();
+}
+
+// マイク音声の通り道（レベル表示と、高速エンジンでの録音）
+async function setupAudio() {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 512;
+    sink = audioCtx.createGain(); sink.gain.value = 0; // スピーカーには出さない
+    analyser.connect(sink); sink.connect(audioCtx.destination);
+    if (audioCtx.audioWorklet) {
+      const code = `class C extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(2048);this.n=0}
+        process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.n++]=c[k];
+        if(this.n===2048){this.port.postMessage(this.b,[this.b.buffer]);this.b=new Float32Array(2048);this.n=0}}}return true}}
+        registerProcessor('cap',C);`;
+      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+      await audioCtx.audioWorklet.addModule(url);
+      capNode = new AudioWorkletNode(audioCtx, 'cap');
+      capNode.connect(sink);
+      capNode.port.onmessage = e => { if (state === 'recording' && engine === 'wc') WC.onAudio(e.data); };
+    }
+  } catch (e) { capNode = null; }
+  connectMic();
+}
+
+function connectMic() {
+  if (!audioCtx || !audioStream) return;
+  try { if (micSrc) micSrc.disconnect(); } catch (e) {}
+  micSrc = audioCtx.createMediaStreamSource(audioStream);
+  micSrc.connect(analyser);
+  if (capNode) micSrc.connect(capNode);
+  audioStream.getAudioTracks().forEach(t => { t.onended = () => { audioStream = null; updateMicUI(); msg('マイクが止まりました。マイクのボタンを押すと再接続します。'); }; });
+}
+
+// ブラウザは「画面を触ったあと」でないと音声処理を始めないので、触るたびに起こす
+const wakeAudio = () => { if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {}); };
+document.addEventListener('pointerdown', wakeAudio, true);
+document.addEventListener('touchend', wakeAudio, true);
+
+function updateMicUI() {
+  const on = !!audioStream;
+  $('micBtn').classList.toggle('off', !on);
+  $('micSlash').classList.toggle('hidden', on);
+  $('micText').classList.toggle('hidden', on);
+}
+
+async function micButton() {
+  if (audioStream) {
+    wakeAudio();
+    msg(audioCtx && audioCtx.state === 'running' ? 'マイクは使えています。' : 'マイクを準備しています…');
+    return;
+  }
+  if (state !== 'idle') { msg('マイクは録画を始める前にオンにしてください。'); return; }
+  await startMic(true);
+  if (audioStream) engine = (await WC.supported()) ? 'wc' : 'mr'; // マイク込みで方式を選び直す
+}
+
+const levelBuf = new Float32Array(512);
+function updateLevel() {
+  if (!analyser || !audioStream) { $('micLevel').style.width = '0'; return; }
+  analyser.getFloatTimeDomainData(levelBuf);
+  let sum = 0; for (let i = 0; i < levelBuf.length; i++) sum += levelBuf[i] * levelBuf[i];
+  const rms = Math.sqrt(sum / levelBuf.length);
+  $('micLevel').style.width = Math.min(100, rms * 400) + '%';
 }
 
 function switchCamera() {
@@ -560,6 +718,7 @@ function draw(now) {
   }
   lastTick = now;
   updateTimer();
+  updateLevel();
   requestAnimationFrame(draw);
 }
 
@@ -575,14 +734,14 @@ function showNotice(t) { $('notice').textContent = t; $('notice').classList.togg
 
 // ---------- 録画操作 ----------
 async function startRecording() {
-  if (!videoStream) return;
-  if (audioCtx) audioCtx.resume();
+  if (!videoStream || !ready) return;
+  wakeAudio();
   try { await DB.clear(); } catch (e) {}
   elapsed = 0;
   state = 'recording';
   E().start();
   lastTick = performance.now();
-  showNotice(''); $('msg').textContent = '';
+  showNotice(''); msg(audioStream ? '' : '音声なしで録画しています（マイクがオフです）');
   setState('recording');
   saveSession();
 }
@@ -596,13 +755,18 @@ function pause() {
 
 function resume() {
   if (state !== 'paused') return;
-  if (audioCtx) audioCtx.resume();
+  wakeAudio();
   E().resume();
   lastTick = performance.now(); // 止めていた時間は数えない
   showNotice('');
   setState('recording');
 }
-const togglePause = () => state === 'recording' ? pause() : resume();
+
+function shutter() {
+  if (state === 'idle') startRecording();
+  else if (state === 'recording') pause();
+  else if (state === 'paused') resume();
+}
 
 function askStop() {
   resumeAfterBack = (state === 'recording');
@@ -627,13 +791,13 @@ function back() {
 
 async function finalize() {
   $('sheet').classList.add('hidden');
-  if (audioCtx) audioCtx.resume();
+  wakeAudio();
   setState('finishing');
   $('busyText').textContent = '動画を仕上げています…'; $('busyPct').textContent = '';
   $('busy').classList.remove('hidden');
   let blob = null;
   try { blob = await E().finish(); }
-  catch (e) { $('msg').textContent = '仕上げに失敗しました：' + e.message; }
+  catch (e) { msg('仕上げに失敗しました：' + e.message); }
   $('busy').classList.add('hidden');
   if (!blob) { setState('paused'); return; }
   try { await DB.clear(); await DB.set('final', { blob }); } catch (e) {}
@@ -659,7 +823,7 @@ function makeFile() {
 }
 async function share() {
   try { await navigator.share({ files: [makeFile()] }); }
-  catch (e) { if (e.name !== 'AbortError') { $('msg').textContent = '共有できなかったので、ダウンロードします。'; download(); } }
+  catch (e) { if (e.name !== 'AbortError') { msg('共有できなかったので、ダウンロードします。'); download(); } }
 }
 function download() {
   const a = document.createElement('a');
@@ -672,7 +836,7 @@ async function retake() {
   playback.pause(); playback.removeAttribute('src');
   playback.style.display = 'none'; canvas.style.display = 'block';
   elapsed = 0; setZoom(1);
-  $('msg').textContent = ''; showNotice('');
+  msg(''); showNotice('');
   setState('idle');
 }
 
@@ -689,34 +853,34 @@ async function restore() {
     const rows = await DB.all();
     if (!E().restore(rows, s)) { elapsed = 0; return; }
     setState('paused');
-    showNotice('前回の続きから撮影できます。「● 再開」を押してください');
+    showNotice('前回の続きから撮影できます。シャッターを押すと再開します');
   } catch (e) {
-    $('msg').textContent = 'このブラウザでは途中保存が使えないため、閉じると録画が消えます。';
+    msg('このブラウザでは途中保存が使えないため、閉じると録画が消えます。');
   }
 }
 
 // ---------- 画面の状態 ----------
+const HINTS = { idle: 'タップで録画', recording: 'タップで一時停止', paused: 'タップで再開' };
 function setState(s) {
   state = s;
+  const active = (s === 'recording' || s === 'paused');
   $('badge').classList.toggle('rec', s === 'recording');
   $('badge').classList.toggle('paused', s === 'paused');
-  const active = (s === 'recording' || s === 'paused');
+  $('shutter').dataset.s = s;
+  $('shutter').setAttribute('aria-label', HINTS[s] || '');
+  $('hint').textContent = HINTS[s] || '';
   $('controls').classList.toggle('hidden', s === 'done' || s === 'finishing');
   $('doneRow').classList.toggle('hidden', s !== 'done');
-  $('btnStart').classList.toggle('hidden', s !== 'idle');
-  $('btnPause').classList.toggle('hidden', !active);
-  $('btnStop').classList.toggle('hidden', !active);
-  $('btnRetake').style.visibility = s === 'done' ? 'visible' : 'hidden';
-  $('btnSwitch').classList.toggle('hidden', s === 'done' || s === 'finishing');
+  $('btnStop').classList.toggle('invisible', !active);
+  $('btnRetake').classList.toggle('hidden', s !== 'done');
+  $('micBtn').classList.toggle('hidden', s === 'done');
   $('zoomBox').classList.toggle('hidden', s === 'done' || s === 'finishing');
-  $('btnPause').textContent = s === 'paused' ? '● 再開' : '❚❚ 一時停止';
 }
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 window.addEventListener('pagehide', pause);
 
-$('btnStart').onclick = startRecording;
-$('btnPause').onclick = togglePause;
+$('shutter').onclick = shutter;
 $('btnStop').onclick = askStop;
 $('btnBack').onclick = back;
 $('btnConfirm').onclick = finalize;
@@ -724,16 +888,19 @@ $('btnShare').onclick = share;
 $('btnSave').onclick = download;
 $('btnRetake').onclick = retake;
 $('btnSwitch').onclick = switchCamera;
+$('micBtn').onclick = micButton;
 
 (async () => {
-  await startMic();
+  await initMedia();
   await setupAudio();
-  await startCamera();
+  updateMicUI();
   engine = (await WC.supported()) ? 'wc' : 'mr';
   const f0 = facing;
   await restore();
   if (facing !== f0) await startCamera(); // 前回のカメラ向きに合わせる
-  $('btnStart').disabled = false;
+  ready = true;
+  $('shutter').disabled = false;
+  if (state === 'idle') $('hint').textContent = HINTS.idle;
 })();
 requestAnimationFrame(t => { lastTick = t; draw(t); });
 }
