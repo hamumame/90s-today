@@ -9,7 +9,7 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
   body {
-    --size: min(calc(100vw - 16px), calc(100vh - 214px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    --size: min(calc(100vw - 16px), calc(100vh - 262px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
     margin: 0; background: #000; color: #fff; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -17,7 +17,7 @@
     gap: 8px; user-select: none; -webkit-user-select: none;
   }
   @supports (height: 100dvh) {
-    body { --size: min(calc(100vw - 16px), calc(100dvh - 214px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
+    body { --size: min(calc(100vw - 16px), calc(100dvh - 262px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
   }
   button { font: inherit; color: inherit; border: none; background: none; cursor: pointer; }
   button:disabled { opacity: .35; }
@@ -70,10 +70,10 @@
     background: rgba(0,0,0,.65); padding: 8px 14px; border-radius: 10px; font-size: 13px;
     text-align: center; width: max-content; max-width: 90%;
   }
+  /* ズーム：カメラ枠のすぐ下 */
   .zoom {
-    position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,.45);
-    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    flex: none; height: 46px; display: flex; align-items: center; gap: 2px; padding: 3px;
+    border-radius: 999px; background: #1c1c1e;
   }
   .zoom button { width: 40px; height: 40px; border-radius: 50%; font-size: 22px; font-weight: 500; }
   .zoom #zoomLabel {
@@ -164,13 +164,15 @@
   <canvas id="canvas" width="720" height="720"></canvas>
   <video id="playback" playsinline controls></video>
   <div class="notice hidden" id="notice"></div>
-  <div class="zoom" id="zoomBox">
-    <button id="zoomOut" aria-label="ズームアウト">−</button>
-    <button id="zoomLabel" aria-label="等倍に戻す">1.0x</button>
-    <button id="zoomIn" aria-label="ズーム">＋</button>
-  </div>
   <div class="busy hidden" id="busy"><div class="spinner"></div><div id="busyText">動画を仕上げています…</div><div id="busyPct"></div></div>
   <div class="progress" id="progress"></div>
+</div>
+
+<!-- ズーム -->
+<div class="zoom" id="zoomBox">
+  <button id="zoomOut" aria-label="ズームアウト">−</button>
+  <button id="zoomLabel" aria-label="等倍に戻す">1.0x</button>
+  <button id="zoomIn" aria-label="ズーム">＋</button>
 </div>
 
 <!-- 下：シャッター（録画・一時停止・再開）とカメラ切替 -->
@@ -1100,7 +1102,7 @@ function setState(s) {
   $('btnStop').classList.toggle('invisible', !active);
   $('btnRetake').classList.toggle('hidden', s !== 'done');
   $('micBtn').classList.toggle('hidden', s === 'done');
-  $('zoomBox').classList.toggle('hidden', s === 'done' || s === 'finishing');
+  $('zoomBox').classList.toggle('invisible', s === 'done' || s === 'finishing');
 }
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
