@@ -71,7 +71,7 @@
     text-align: center; width: max-content; max-width: 90%;
   }
   .zoom {
-    position: absolute; right: 10px; bottom: 12px;
+    position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%);
     display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,.45);
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
@@ -410,7 +410,7 @@ const WC = {
     if (this.aCodec !== 'opus' && !asc) asc = aacConfig((this.acfg && this.acfg.sampleRate) || sr).description;
     return MP4.build(
       { width: OUT, height: OUT, avcC: this.vcfg.description, samples: v },
-      a.length ? { codec: this.aCodec, sampleRate: (this.acfg && this.acfg.sampleRate) || sr, channels: 1, description: asc, samples: a } : null
+      a.length ? { codec: this.aCodec, sampleRate: (this.acfg && this.acfg.sampleRate) || sr, channels: (this.acfg && this.acfg.numberOfChannels) || 1, description: asc, samples: a } : null
     );
   }
 };
@@ -595,6 +595,40 @@ const MP4 = (() => {
   function audioBase(type, ch, sr, extra) {
     return box(type, zeros(6), u16(1), zeros(8), u16(ch), u16(16), u16(0), u16(0), u32((sr & 0xffff) << 16), extra);
   }
+  // 端末によって「設定情報」の形が違うので、中から AudioSpecificConfig だけを取り出す
+  // （iPhoneのSafariは esds 形式の入れ物ごと渡してくる）
+  function extractASC(desc, sr, ch) {
+    const d = desc ? u8(desc) : null;
+    const make = () => {
+      const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
+      let fi = rates.indexOf(sr); if (fi < 0) fi = 3;
+      return new Uint8Array([(2 << 3) | (fi >> 1), ((fi & 1) << 7) | (ch << 3)]);
+    };
+    if (!d || !d.length) return make();
+    if (d.length <= 7 && [1, 2, 3, 4, 5, 29].includes(d[0] >> 3) && d[0] !== 0x03) return d;
+    let i = 0;
+    for (let k = 0; k + 4 <= d.length; k++) {
+      if (d[k] === 0x65 && d[k + 1] === 0x73 && d[k + 2] === 0x64 && d[k + 3] === 0x73) { i = k + 8; break; } // 'esds'
+    }
+    const readLen = () => { let n = 0; for (let b = 0; b < 4 && i < d.length; b++) { const c = d[i++]; n = (n << 7) | (c & 0x7f); if (!(c & 0x80)) break; } return n; };
+    while (i < d.length) {
+      const tag = d[i++]; const len = readLen();
+      if (tag === 0x03) {
+        const flags = d[i + 2]; i += 3;
+        if (flags & 0x80) i += 2;
+        if (flags & 0x40) i += 1 + d[i];
+        if (flags & 0x20) i += 2;
+      } else if (tag === 0x04) {
+        i += 13;
+      } else if (tag === 0x05) {
+        return d.slice(i, i + len);
+      } else {
+        i += len;
+      }
+    }
+    return make();
+  }
+
   function aacEntry(ch, sr, asc) {
     const dcd = desc(4, cat([u8b(0x40), u8b(0x15), zeros(3), u32(0), u32(0), desc(5, u8(asc))]));
     const esd = desc(3, cat([u16(1), u8b(0), dcd, desc(6, u8b(2))]));
@@ -625,7 +659,7 @@ const MP4 = (() => {
         if (d && d.length >= 12 && String.fromCharCode(...d.slice(0, 8)) === 'OpusHead') preSkip = d[10] | (d[11] << 8);
         entry = opusEntry(audio.channels, preSkip, audio.sampleRate);
       } else {
-        entry = aacEntry(audio.channels, audio.sampleRate, audio.description);
+        entry = aacEntry(audio.channels, audio.sampleRate, extractASC(audio.description, audio.sampleRate, audio.channels));
         // ADTSヘッダー付きで出てくる端末向けに、ヘッダーを外す
         audio.samples = audio.samples.map(s => {
           const d = u8(s.d);
@@ -659,7 +693,7 @@ const MP4 = (() => {
     const mdatLen = payload.reduce((a, p) => a + p.length, 0) + 8;
     return new Blob([ftyp, moov, u32(mdatLen), str('mdat'), ...payload], { type: 'video/mp4' });
   }
-  return { build };
+  return { build, extractASC };
 })();
 
 // ================= 共通処理 =================
